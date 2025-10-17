@@ -28,8 +28,9 @@ class Printer(RichLog):
         self.begin_capture_print()
 
     def on_print(self, event: events.Print) -> None:
-        if (text := event.text) != "\n":
-            self.write(text.rstrip().replace("DEBUG", "[red]DEBUG[/]"))
+        # Only show SUCCESS-level messages in the UI log
+        if (text := event.text) != "\n" and "SUCCESS" in text:
+            self.write(text.rstrip())
 
 
 class ScrollingBlocks(Log):
@@ -88,19 +89,50 @@ class Typewriter(Static):
         *args: str,
         **kwargs: str,
     ) -> None:
-        super().__init__(*args, *kwargs)
+        super().__init__(*args, **kwargs)
         self._text = text
         self.__id = id
         self._speed = speed
         self._repeat = repeat
+        self._blink_counter = 0
 
     def compose(self) -> ComposeResult:
-        self._static = Static()
+        self._static = Static(markup=True)
         self._vertical_scroll = VerticalScroll(self._static, id=self.__id)
         yield self._vertical_scroll
 
+    def _is_safe_position(self, text: str, pos: int) -> bool:
+        """Check if slicing the text at pos results in balanced markup."""
+        stack = []
+        i = 0
+        while i < pos:
+            if text[i] == '[':
+                if i + 1 < len(text) and text[i + 1] == '/':
+                    # Closing tag
+                    j = i + 2
+                    tag = ''
+                    while j < len(text) and text[j] != ']':
+                        tag += text[j]
+                        j += 1
+                    if stack and stack[-1] == tag:
+                        stack.pop()
+                    i = j
+                else:
+                    # Opening tag
+                    j = i + 1
+                    tag = ''
+                    while j < len(text) and text[j] != ']':
+                        tag += text[j]
+                        j += 1
+                    stack.append(tag)
+                    i = j
+            else:
+                i += 1
+        return len(stack) == 0
+
     def _get_iterator(self) -> Iterator[str]:
-        return (self._text[:i] + "[blink]▃[/]" for i in range(len(self._text) + 1))
+        safe_positions = [i for i in range(len(self._text) + 1) if self._is_safe_position(self._text, i)]
+        return (self._text[:i] for i in safe_positions)
 
     def on_mount(self) -> None:
         self._iter_text = self._get_iterator()
@@ -111,10 +143,14 @@ class Typewriter(Static):
         try:
             if not self._vertical_scroll.is_vertical_scroll_end:
                 self._vertical_scroll.scroll_down()
-            self._static.update(next(self._iter_text))
+            base_text = next(self._iter_text)
+            cursor = "▃" if (self._blink_counter // 5) % 2 == 0 else " "
+            self._static.update(base_text + cursor)
+            self._blink_counter += 1
         except StopIteration:
             if self._repeat:
                 self._iter_text = self._get_iterator()
+                self._blink_counter = 0
 
 
 # Screens
@@ -123,8 +159,8 @@ class Typewriter(Static):
 class SplashScreen(Screen[None]):
     """Splash screen shown on startup."""
 
-    with open(Path("src/glados/glados_ui/images/splash.ansi"), encoding="utf-8") as f:
-        SPLASH_ANSI = Text.from_ansi(f.read(), no_wrap=True, end="")
+    # with open(Path("src/glados/glados_ui/images/converted.ansi"), encoding="utf-8") as f:
+    #     SPLASH_ANSI = Text.from_ansi(f.read(), no_wrap=True, end="")
 
     def compose(self) -> ComposeResult:
         """
@@ -140,7 +176,7 @@ class SplashScreen(Screen[None]):
                 - A typewriter-animated login text with a slow character reveal speed
         """
         with Container(id="splash_logo_container"):
-            yield Static(self.SPLASH_ANSI, id="splash_logo")
+            # yield Static(self.SPLASH_ANSI, id="splash_logo")
             yield Label(aperture, id="banner")
         yield Typewriter(login_text, id="login_text", speed=0.0075)
 
@@ -222,16 +258,17 @@ class GladosUI(App[None]):
             description="Help",
             key_display="?",
         ),
+        Binding(key="space", action="start_listening", description="Start listening (manual)", key_display="Space"),
     ]
     CSS_PATH = "glados_ui/glados.tcss"
 
     ENABLE_COMMAND_PALETTE = False
 
-    TITLE = "GlaDOS v 1.09"
+    TITLE = "Soni Assistant v 2.36"
 
-    SUB_TITLE = "(c) 1982 Aperture Science, Inc."
+    SUB_TITLE = "(c) 2024 SoICT Innovation Club."
 
-    with open(Path("src/glados/glados_ui/images/logo.ansi"), encoding="utf-8") as f:
+    with open(Path("src/glados/glados_ui/images/converted.ansi"), encoding="utf-8") as f:
         LOGO_ANSI = Text.from_ansi(f.read(), no_wrap=True, end="")
 
     def compose(self) -> ComposeResult:
@@ -267,9 +304,9 @@ class GladosUI(App[None]):
         with Container(id="block_container", classes="fadeable"):
             yield ScrollingBlocks(id="scrolling_block", classes="block")
             with Vertical(id="text_block", classes="block"):
-                yield Digits("2.67")
-                yield Digits("1002")
-                yield Digits("45.6")
+                yield Digits("19.10")
+                yield Digits("2025")
+                yield Digits("Saturday")
             yield Label(self.LOGO_ANSI, id="logo_block", classes="block")
 
     def on_load(self) -> None:
@@ -295,9 +332,10 @@ class GladosUI(App[None]):
         """
         # Cause logger to print all log text. Printed text can then be  captured
         # by the main_log widget
-        logger.remove()
-        fmt = "{time:YYYY-MM-DD HH:mm:ss.SSS} | <level>{level: <8}</level> | {name}:{function}:{line} - {message}"
-        logger.add(print, format=fmt)
+    logger.remove()
+    fmt = "{time:YYYY-MM-DD HH:mm:ss.SSS} | <level>{level: <8}</level> | {name}:{function}:{line} - {message}"
+    # Only emit SUCCESS level logs to the UI (suppress INFO/DEBUG/WARNING/ERROR)
+    logger.add(print, format=fmt, level="SUCCESS")
 
     def on_mount(self) -> None:
         """
@@ -357,8 +395,11 @@ class GladosUI(App[None]):
         glados_config = GladosConfig.from_yaml(str(config_path))
         glados = Glados.from_config(glados_config)
 
-        self.glados = self.run_worker(glados.start_listen_event_loop, exclusive=False, thread=True)
-        pass
+        # Keep a reference to the Glados instance so we can call control methods like start_manual_listening
+        self._glados_instance = glados
+
+        # Run the listening loop in a background worker
+        self.glados_worker = self.run_worker(glados.start_listen_event_loop, exclusive=False, thread=True)
 
     @classmethod
     def run_app(cls, config_path: str | Path = "glados_config.yaml") -> None:
@@ -368,6 +409,17 @@ class GladosUI(App[None]):
             app.run()
         except KeyboardInterrupt:
             sys.exit()
+
+    def action_start_listening(self) -> None:
+        """User-initiated manual trigger to start listening (spacebar)."""
+        # If we have a Glados instance, call its manual trigger method. Otherwise, log.
+        if hasattr(self, "_glados_instance") and self._glados_instance is not None:
+            try:
+                self._glados_instance.start_manual_listening()
+            except Exception:
+                logger.exception("Failed to trigger manual listening on Glados instance")
+        else:
+            logger.warning("Glados instance not running; cannot start manual listening")
 
 
 if __name__ == "__main__":

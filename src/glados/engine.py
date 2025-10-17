@@ -203,6 +203,8 @@ class Glados:
         self._buffer: queue.Queue[NDArray[np.float32]] = queue.Queue(maxsize=self.BUFFER_SIZE // self.VAD_SIZE)
         self._recording_started = False
         self._gap_counter = 0
+        # Manual trigger for noisy environments: when True, start recording even if VAD is low
+        self.manual_trigger = False
 
         self._messages: list[dict[str, str]] = list(personality_preprompt)
 
@@ -343,6 +345,17 @@ class Glados:
         """
         return cls.from_config(GladosConfig.from_yaml(path))
 
+    def start_manual_listening(self) -> None:
+        """
+        Set the manual trigger to start recording on the next audio sample.
+
+        This is intended for noisy environments where automatic VAD may produce false
+        positives. Calling this method will cause the pre-activation buffer to start
+        recording on the next incoming sample and is cleared once recording begins.
+        """
+        logger.info("Manual listening triggered by user input")
+        self.manual_trigger = True
+
     def start_listen_event_loop(self) -> None:
         """
         Start the voice assistant's listening event loop, continuously processing audio input.
@@ -418,7 +431,9 @@ class Glados:
             self._buffer.get()  # Discard the oldest sample to make room for new ones
         self._buffer.put(sample)
 
-        if vad_confidence:  # Voice activity detected
+        # Only begin recording when the user manually triggers listening.
+        # In noisy environments we don't want automatic VAD to start recording.
+        if self.manual_trigger:
             if not self.interruptible and self.currently_speaking.is_set():
                 logger.info("Interruption is disabled, and the assistant is currently speaking, ignoring new input.")
                 return
@@ -427,6 +442,12 @@ class Glados:
             self.processing = False  # Turns off processing on threads for the LLM and TTS!!!
             self._samples = list(self._buffer.queue)
             self._recording_started = True
+            # Reset manual trigger after starting recording so subsequent buffer fills rely on VAD again
+            self.manual_trigger = False
+        else:
+            # If VAD fired but manual trigger is required, ignore the VAD event
+            if vad_confidence:
+                logger.debug("VAD detected speech but manual trigger is required; ignoring VAD.")
 
     def _process_activated_audio(self, sample: NDArray[np.float32], vad_confidence: bool) -> None:
         """

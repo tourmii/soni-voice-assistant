@@ -12,8 +12,8 @@ https://superuser.com/questions/361297/
 colors for log items are hardcoded in the app
 */
 
-$primary: #ffb000;
-$foreground: #ffb000;
+$primary: #0084ffff;
+$foreground: #13b30eff;
 $background: #282828;
 $surface: $background;
 
