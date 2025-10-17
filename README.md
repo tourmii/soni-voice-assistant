@@ -110,10 +110,10 @@ Glados:
 
 ## Usage
 
-### Start the Voice Assistant
+### Start the Voice Assistant with UI
 
 ```bash
-uv run glados start
+uv run glados tui
 ```
 
 **With Custom Configuration:**
