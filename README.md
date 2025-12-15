@@ -16,7 +16,7 @@ An AI-powered voice assistant project developed for the SoICT Innovation Club (S
 - **Edge Device Optimized**: Runs smoothly on Raspberry Pi 4B with 4GB RAM and other edge devices
 
 ## Demo 
-<iframe src="https://drive.google.com/file/d/1_wzkdAzlpumHTrX29NL-Ir1fBXMBz3nl/preview" width="640" height="480"></iframe>
+[![Demo video](https://img.shields.io/badge/▶-Watch%20Demo-blue)](https://drive.google.com/file/d/1_wzkdAzlpumHTrX29NL-Ir1fBXMBz3nl/view)
 
 
 ## Prerequisites
