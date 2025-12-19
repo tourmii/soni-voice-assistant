@@ -803,40 +803,55 @@ class Glados:
                     else:
                         # Handle streaming response (OpenAI/Ollama format)
                         sentence = []
-                        for line in response.iter_lines():
-                            if self.processing is False:
-                                break  # If the stop flag is set from new voice input, halt processing
-                            if line:  # Filter out empty keep-alive new lines
-                                try:
-                                    cleaned_line = self._clean_raw_bytes(line)
-                                    if cleaned_line:  # Add check for empty cleaned line
-                                        chunk = self._process_chunk(cleaned_line)
-                                        if chunk:
-                                            sentence.append(chunk)
-                                            # If there is a pause token, send the sentence to the TTS queue
-                                            if (
-                                                chunk
-                                                in [
-                                                    ".",
-                                                    "!",
-                                                    "?",
-                                                    ":",
-                                                    ";",
-                                                    "?!",
-                                                    "\n",
-                                                    "\n\n",
-                                                ]
-                                                and sentence[-2].isdigit() is False
-                                            ):  # Don't split on numbers!
-                                                logger.info(f"Chunk: {chunk}")
-                                                self._process_sentence(sentence)
-                                                sentence = []
-                                except Exception as e:
-                                    logger.error(f"Error processing line: {e}")
-                                    continue
+                        
+                        # Check if the response is actually non-streaming (full JSON response)
+                        content_type = response.headers.get('content-type', '')
+                        if 'text/event-stream' not in content_type:
+                            # Non-streaming response - parse as complete JSON
+                            try:
+                                result = response.json()
+                                if "choices" in result and len(result["choices"]) > 0:
+                                    full_text = result["choices"][0].get("message", {}).get("content", "")
+                                    if full_text:
+                                        self._process_complete_response(full_text)
+                            except Exception as e:
+                                logger.error(f"Error processing non-streaming OpenAI response: {e}")
+                        else:
+                            # Streaming response - process line by line
+                            for line in response.iter_lines():
+                                if self.processing is False:
+                                    break  # If the stop flag is set from new voice input, halt processing
+                                if line:  # Filter out empty keep-alive new lines
+                                    try:
+                                        cleaned_line = self._clean_raw_bytes(line)
+                                        if cleaned_line:  # Add check for empty cleaned line
+                                            chunk = self._process_chunk(cleaned_line)
+                                            if chunk:
+                                                sentence.append(chunk)
+                                                # If there is a pause token, send the sentence to the TTS queue
+                                                if (
+                                                    chunk
+                                                    in [
+                                                        ".",
+                                                        "!",
+                                                        "?",
+                                                        ":",
+                                                        ";",
+                                                        "?!",
+                                                        "\n",
+                                                        "\n\n",
+                                                    ]
+                                                    and sentence[-2].isdigit() is False
+                                                ):  # Don't split on numbers!
+                                                    logger.info(f"Chunk: {chunk}")
+                                                    self._process_sentence(sentence)
+                                                    sentence = []
+                                    except Exception as e:
+                                        logger.error(f"Error processing line: {e}")
+                                        continue
 
-                        if self.processing and sentence:
-                            self._process_sentence(sentence)
+                            if self.processing and sentence:
+                                self._process_sentence(sentence)
                     self.tts_queue.put("<EOS>")  # Add end of stream token to the queue
             except queue.Empty:
                 time.sleep(self.PAUSE_TIME)
@@ -933,7 +948,9 @@ class Glados:
         try:
             # Handle OpenAI format
             if "choices" in line:
-                content = line.get("choices", [{}])[0].get("delta", {}).get("content")
+                choice = line.get("choices", [{}])[0]
+                # Try streaming format first (delta), then non-streaming format (message)
+                content = choice.get("delta", {}).get("content") or choice.get("message", {}).get("content")
                 return content if content else None
             # Handle Gemini format
             elif "candidates" in line:
